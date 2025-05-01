@@ -12,7 +12,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: Fetch Bing Wallpapers for Multiple Regions
+      - name: Fetch Bing Wallpapers for Multiple Regions with Debugging
         run: |
           declare -A REGIONS=(
             ["en-US"]="United States"
@@ -28,18 +28,27 @@ jobs:
             FOLDER="wallpapers/$region"
             mkdir -p "$FOLDER"
 
+            echo "Fetching data for region: $region..."
             JSON_DATA=$(curl -s "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=$region")
+            echo "Raw JSON Data for $region: $JSON_DATA"  # 输出完整 JSON 数据
+
             URL=$(echo "$JSON_DATA" | jq -r '.images[0].url')
             TITLE=$(echo "$JSON_DATA" | jq -r '.images[0].title')
             COPYRIGHT=$(echo "$JSON_DATA" | jq -r '.images[0].copyright')
             DESCRIPTION=$(echo "$JSON_DATA" | jq -r '.images[0].desc // empty')
+
+            echo "Parsed Data for $region:"
+            echo "Title: $TITLE"
+            echo "Copyright: $COPYRIGHT"
+            echo "Description: $DESCRIPTION"
+            echo "URL: $URL"
 
             FULL_URL="https://www.bing.com$URL"
             FILENAME="$(date +"%Y-%m-%d").jpg"
             curl -s "$FULL_URL" -o "$FOLDER/$FILENAME"
           done
 
-      - name: Generate Sitemap and JSON
+      - name: Generate Sitemap and JSON with Debugging
         env:
           WEBSITE: ${{ secrets.WEBSITE }}  # 读取环境变量中的站点 URL
         run: |
@@ -52,6 +61,11 @@ jobs:
             IMAGE_URL="$WEBSITE/$FILE"
             LAST_MODIFIED="$(date -r "$FILE" +"%Y-%m-%d")"
             REGION=$(echo "$FILE" | awk -F '/' '{print $2}')  # 提取区域代码
+
+            echo "Processing file: $FILE"
+            echo "Region Code: $REGION"
+            echo "Image URL: $IMAGE_URL"
+            echo "Last Modified: $LAST_MODIFIED"
 
             # 格式化 JSON，去掉最后一个逗号
             if [ "$first_entry" = true ]; then
@@ -79,14 +93,20 @@ jobs:
           echo '</urlset>' >> sitemap.xml
           echo ']' >> wallpapers.json  # 关闭 JSON 数组
 
+      - name: Ensure Push by Creating .workflow-push File
+        run: |
+          COMMIT_HASH=$(git rev-parse --short HEAD || echo "0000000")  # 获取最新的短 SHA，若失败则使用默认值
+          echo "Workflow executed with commit $COMMIT_HASH" > .workflow-push
+
       - name: Commit and Push Changes
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}  # 使用 Personal Access Token
         run: |
           GITHUB_REPO=${{ github.repository }}  # 自动获取 GitHub 仓库名称
+          COMMIT_HASH=$(git rev-parse --short HEAD || echo "0000000")  # 获取短 SHA
 
           git config --global user.name "GitHub Actions"
           git config --global user.email "github-actions@users.noreply.github.com"
-          git add wallpapers/ sitemap.xml wallpapers.json
-          git commit -m "Update Bing wallpapers, sitemap, and JSON: $(date +"%Y-%m-%d")"
+          git add wallpapers/ sitemap.xml wallpapers.json .workflow-push
+          git commit -m "Workflow execution commit: $COMMIT_HASH"
           git push https://${{ secrets.PAT_TOKEN }}@github.com/${GITHUB_REPO}.git
