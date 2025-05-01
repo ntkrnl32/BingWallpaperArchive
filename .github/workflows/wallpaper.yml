@@ -1,0 +1,41 @@
+name: Bing Wallpaper Scraper
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 每天午夜运行
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Fetch Bing Wallpapers for Multiple Regions
+        run: |
+          declare -A REGIONS=(
+            ["en-US"]="United_States"
+            ["zh-CN"]="China"
+            ["ja-JP"]="Japan"
+            ["fr-FR"]="France"
+            ["de-DE"]="Germany"
+          )
+
+          for region in "${!REGIONS[@]}"; do
+            FOLDER="wallpapers/${REGIONS[$region]}"
+            mkdir -p "$FOLDER"
+
+            URL=$(curl -s "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=$region" | jq -r '.images[0].url')
+            FULL_URL="https://www.bing.com$URL"
+            FILENAME="$(date +"%Y-%m-%d").jpg"
+            curl -s "$FULL_URL" -o "$FOLDER/$FILENAME"
+          done
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "github-actions@users.noreply.github.com"
+          git add wallpapers/
+          git commit -m "Update Bing wallpapers: $(date +"%Y-%m-%d")"
+          git push
