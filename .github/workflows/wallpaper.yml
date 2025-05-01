@@ -15,29 +15,78 @@ jobs:
       - name: Fetch Bing Wallpapers for Multiple Regions
         run: |
           declare -A REGIONS=(
-            ["en-US"]="United_States"
+            ["en-US"]="United States"
             ["zh-CN"]="China"
             ["ja-JP"]="Japan"
             ["fr-FR"]="France"
             ["de-DE"]="Germany"
           )
 
+          mkdir -p wallpapers
+
           for region in "${!REGIONS[@]}"; do
-            FOLDER="wallpapers/${REGIONS[$region]}"
+            FOLDER="wallpapers/$region"
             mkdir -p "$FOLDER"
 
-            URL=$(curl -s "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=$region" | jq -r '.images[0].url')
+            JSON_DATA=$(curl -s "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=$region")
+            URL=$(echo "$JSON_DATA" | jq -r '.images[0].url')
+            TITLE=$(echo "$JSON_DATA" | jq -r '.images[0].title')
+            COPYRIGHT=$(echo "$JSON_DATA" | jq -r '.images[0].copyright')
+            DESCRIPTION=$(echo "$JSON_DATA" | jq -r '.images[0].desc')
+
             FULL_URL="https://www.bing.com$URL"
             FILENAME="$(date +"%Y-%m-%d").jpg"
             curl -s "$FULL_URL" -o "$FOLDER/$FILENAME"
           done
 
+      - name: Generate Sitemap and JSON
+        env:
+          WEBSITE: ${{ secrets.WEBSITE }}  # 读取环境变量中的站点 URL
+        run: |
+          echo '<?xml version="1.0" encoding="UTF-8"?>' > sitemap.xml
+          echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' >> sitemap.xml
+          echo '[' > wallpapers.json  # 初始化 JSON 数组
+
+          first_entry=true
+          find wallpapers -type f -name "*.jpg" | while read FILE; do
+            IMAGE_URL="$WEBSITE/$FILE"
+            LAST_MODIFIED="$(date -r "$FILE" +"%Y-%m-%d")"
+            REGION=$(echo "$FILE" | awk -F '/' '{print $2}')  # 提取区域代码
+
+            # 格式化 JSON，去掉最后一个逗号
+            if [ "$first_entry" = true ]; then
+              first_entry=false
+            else
+              echo ',' >> wallpapers.json
+            fi
+
+            echo "  {" >> wallpapers.json
+            echo "    \"url\": \"$IMAGE_URL\"," >> wallpapers.json
+            echo "    \"title\": \"$TITLE\"," >> wallpapers.json
+            echo "    \"copyright\": \"$COPYRIGHT\"," >> wallpapers.json
+            echo "    \"region_code\": \"$REGION\"," >> wallpapers.json
+            echo "    \"description\": \"$DESCRIPTION\"," >> wallpapers.json
+            echo "    \"lastmod\": \"$LAST_MODIFIED\"" >> wallpapers.json
+            echo "  }" >> wallpapers.json
+
+            # 写入 sitemap.xml
+            echo '  <url>' >> sitemap.xml
+            echo "    <loc>$IMAGE_URL</loc>" >> sitemap.xml
+            echo "    <lastmod>$LAST_MODIFIED</lastmod>" >> sitemap.xml
+            echo "  </url>" >> sitemap.xml
+          done
+
+          echo '</urlset>' >> sitemap.xml
+          echo ']' >> wallpapers.json  # 关闭 JSON 数组
+
       - name: Commit and Push Changes
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}  # 使用 Personal Access Token
         run: |
+          GITHUB_REPO=${{ github.repository }}  # 自动获取 GitHub 仓库名称
+
           git config --global user.name "GitHub Actions"
           git config --global user.email "github-actions@users.noreply.github.com"
-          git add wallpapers/
-          git commit -m "Update Bing wallpapers: $(date +"%Y-%m-%d")"
-          git push https://${{ secrets.PAT_TOKEN }}@github.com/NT-AUTHORITY/BingWallpaperArchive.git
+          git add wallpapers/ sitemap.xml wallpapers.json
+          git commit -m "Update Bing wallpapers, sitemap, and JSON: $(date +"%Y-%m-%d")"
+          git push https://${{ secrets.PAT_TOKEN }}@github.com/${GITHUB_REPO}.git
