@@ -32,7 +32,7 @@ jobs:
             URL=$(echo "$JSON_DATA" | jq -r '.images[0].url')
             TITLE=$(echo "$JSON_DATA" | jq -r '.images[0].title')
             COPYRIGHT=$(echo "$JSON_DATA" | jq -r '.images[0].copyright')
-            DESCRIPTION=$(echo "$JSON_DATA" | jq -r '.images[0].desc')
+            DESCRIPTION=$(echo "$JSON_DATA" | jq -r '.images[0].desc // empty')
 
             FULL_URL="https://www.bing.com$URL"
             FILENAME="$(date +"%Y-%m-%d").jpg"
