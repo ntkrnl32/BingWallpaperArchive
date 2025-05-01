@@ -12,7 +12,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: Fetch Bing Wallpapers for Multiple Regions with Debugging
+      - name: Fetch Bing Wallpapers and Store Metadata
         run: |
           declare -A REGIONS=(
             ["en-US"]="United States"
@@ -22,52 +22,60 @@ jobs:
             ["de-DE"]="Germany"
           )
 
-          mkdir -p wallpapers
+          mkdir -p wallpapers metadata
+
+          COMMIT_HASH=$(git rev-parse --short HEAD || echo "0000000")  # 获取最近的提交哈希
+          METADATA_FILE="metadata/.metadata-${COMMIT_HASH}"  # 使用 commit 作为文件名
 
           for region in "${!REGIONS[@]}"; do
             FOLDER="wallpapers/$region"
             mkdir -p "$FOLDER"
 
-            echo "Fetching data for region: $region..."
             JSON_DATA=$(curl -s "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=$region")
-            echo "Raw JSON Data for $region: $JSON_DATA"  # 输出完整 JSON 数据
-
             URL=$(echo "$JSON_DATA" | jq -r '.images[0].url')
             TITLE=$(echo "$JSON_DATA" | jq -r '.images[0].title')
             COPYRIGHT=$(echo "$JSON_DATA" | jq -r '.images[0].copyright')
             DESCRIPTION=$(echo "$JSON_DATA" | jq -r '.images[0].desc // empty')
 
-            echo "Parsed Data for $region:"
-            echo "Title: $TITLE"
-            echo "Copyright: $COPYRIGHT"
-            echo "Description: $DESCRIPTION"
-            echo "URL: $URL"
-
             FULL_URL="https://www.bing.com$URL"
             FILENAME="$(date +"%Y-%m-%d").jpg"
             curl -s "$FULL_URL" -o "$FOLDER/$FILENAME"
+
+            # 存储元数据
+            echo "$region|$TITLE|$COPYRIGHT|$DESCRIPTION" >> "$METADATA_FILE"
           done
 
-      - name: Generate Sitemap and JSON with Debugging
+      - name: Generate Sitemap and JSON with Correct Title
         env:
           WEBSITE: ${{ secrets.WEBSITE }}  # 读取环境变量中的站点 URL
         run: |
+          COMMIT_HASH=$(git rev-parse --short HEAD || echo "0000000")  # 获取最近的提交哈希
+          METADATA_FILE="metadata/.metadata-${COMMIT_HASH}"  # 读取元数据文件
+
           echo '<?xml version="1.0" encoding="UTF-8"?>' > sitemap.xml
           echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' >> sitemap.xml
           echo '[' > wallpapers.json  # 初始化 JSON 数组
 
           first_entry=true
           find wallpapers -type f -name "*.jpg" | while read FILE; do
-            IMAGE_URL="$WEBSITE/$FILE"
-            LAST_MODIFIED="$(date -r "$FILE" +"%Y-%m-%d")"
             REGION=$(echo "$FILE" | awk -F '/' '{print $2}')  # 提取区域代码
+            IMAGE_URL="$WEBSITE/${FILE#*/}"
+            LAST_MODIFIED="$(date -r "$FILE" +"%Y-%m-%d")"
+
+            # 读取元数据
+            METADATA=$(grep "^$REGION|" "$METADATA_FILE" 2>/dev/null || echo "$REGION|Unknown|Unknown|Unknown")
+            TITLE=$(echo "$METADATA" | awk -F '|' '{print $2}')
+            COPYRIGHT=$(echo "$METADATA" | awk -F '|' '{print $3}')
+            DESCRIPTION=$(echo "$METADATA" | awk -F '|' '{print $4}')
 
             echo "Processing file: $FILE"
             echo "Region Code: $REGION"
             echo "Image URL: $IMAGE_URL"
-            echo "Last Modified: $LAST_MODIFIED"
+            echo "Title: $TITLE"
+            echo "Copyright: $COPYRIGHT"
+            echo "Description: $DESCRIPTION"
 
-            # 格式化 JSON，去掉最后一个逗号
+            # 格式化 JSON
             if [ "$first_entry" = true ]; then
               first_entry=false
             else
@@ -95,7 +103,7 @@ jobs:
 
       - name: Ensure Push by Creating .workflow-push File
         run: |
-          COMMIT_HASH=$(git rev-parse --short HEAD || echo "0000000")  # 获取最新的短 SHA，若失败则使用默认值
+          COMMIT_HASH=$(git rev-parse --short HEAD || echo "0000000")
           echo "Workflow executed with commit $COMMIT_HASH" > .workflow-push
 
       - name: Commit and Push Changes
@@ -107,6 +115,6 @@ jobs:
 
           git config --global user.name "GitHub Actions"
           git config --global user.email "github-actions@users.noreply.github.com"
-          git add wallpapers/ sitemap.xml wallpapers.json .workflow-push
+          git add wallpapers/ sitemap.xml wallpapers.json metadata/.metadata-${COMMIT_HASH} .workflow-push
           git commit -m "Workflow execution commit: $COMMIT_HASH"
           git push https://${{ secrets.PAT_TOKEN }}@github.com/${GITHUB_REPO}.git
