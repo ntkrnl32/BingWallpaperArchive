@@ -13,6 +13,8 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Fetch Bing Wallpapers and Store Metadata
+        env:
+          WORKFLOW_ID: ${{ github.run_id }}  # 获取当前 Workflow 运行 ID
         run: |
           declare -A REGIONS=(
             ["en-US"]="United States"
@@ -24,8 +26,7 @@ jobs:
 
           mkdir -p wallpapers metadata
 
-          COMMIT_HASH=$(git rev-parse --short HEAD || echo "0000000")  # 获取最近的提交哈希
-          METADATA_FILE="metadata/.metadata-${COMMIT_HASH}"  # 使用 commit 作为文件名
+          METADATA_FILE="metadata/.metadata-${WORKFLOW_ID}"  # 使用 Workflow ID 作为文件名
 
           for region in "${!REGIONS[@]}"; do
             FOLDER="wallpapers/$region"
@@ -48,9 +49,9 @@ jobs:
       - name: Generate Sitemap and JSON with Correct Title
         env:
           WEBSITE: ${{ secrets.WEBSITE }}  # 读取环境变量中的站点 URL
+          WORKFLOW_ID: ${{ github.run_id }}  # 获取 Workflow 运行 ID
         run: |
-          COMMIT_HASH=$(git rev-parse --short HEAD || echo "0000000")  # 获取最近的提交哈希
-          METADATA_FILE="metadata/.metadata-${COMMIT_HASH}"  # 读取元数据文件
+          METADATA_FILE="metadata/.metadata-${WORKFLOW_ID}"  # 读取元数据文件
 
           echo '<?xml version="1.0" encoding="UTF-8"?>' > sitemap.xml
           echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' >> sitemap.xml
@@ -102,19 +103,20 @@ jobs:
           echo ']' >> wallpapers.json  # 关闭 JSON 数组
 
       - name: Ensure Push by Creating .workflow-push File
+        env:
+          WORKFLOW_ID: ${{ github.run_id }}  # 获取 Workflow 运行 ID
         run: |
-          COMMIT_HASH=$(git rev-parse --short HEAD || echo "0000000")
-          echo "Workflow executed with commit $COMMIT_HASH" > .workflow-push
+          echo "Workflow executed with ID $WORKFLOW_ID" > .workflow-push
 
       - name: Commit and Push Changes
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}  # 使用 Personal Access Token
+          WORKFLOW_ID: ${{ github.run_id }}  # 获取 Workflow 运行 ID
         run: |
           GITHUB_REPO=${{ github.repository }}  # 自动获取 GitHub 仓库名称
-          COMMIT_HASH=$(git rev-parse --short HEAD || echo "0000000")  # 获取短 SHA
 
           git config --global user.name "GitHub Actions"
           git config --global user.email "github-actions@users.noreply.github.com"
-          git add wallpapers/ sitemap.xml wallpapers.json metadata/.metadata-${COMMIT_HASH} .workflow-push
-          git commit -m "Workflow execution commit: $COMMIT_HASH"
+          git add wallpapers/ sitemap.xml wallpapers.json metadata/.metadata-${WORKFLOW_ID} .workflow-push
+          git commit -m "Workflow execution ID: $WORKFLOW_ID"
           git push https://${{ secrets.PAT_TOKEN }}@github.com/${GITHUB_REPO}.git
